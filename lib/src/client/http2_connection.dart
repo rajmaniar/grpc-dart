@@ -125,9 +125,9 @@ class Http2ClientConnection implements connection.ClientConnection {
       if (_hasPendingCalls()) {
         // Take all pending calls out, and reschedule.
         final pendingCalls = _pendingCalls.toList();
-        _pendingCalls.clear();
         pendingCalls.forEach(dispatchCall);
       }
+      _pendingCalls.clear();
     }).catchError(_handleConnectionFailure);
   }
 
