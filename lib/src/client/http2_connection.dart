@@ -76,35 +76,39 @@ class Http2ClientConnection implements connection.ClientConnection {
   static const _estimatedRoundTripTime = const Duration(milliseconds: 20);
 
   Future<ClientTransportConnection> connectTransport() async {
-    final securityContext = credentials.securityContext;
-    Socket socket = await Socket.connect(host, port);
-    // Don't wait for io buffers to fill up before sending requests.
-    socket.setOption(SocketOption.tcpNoDelay, true);
-    if (securityContext != null) {
-      // Todo(sigurdm): We want to pass supportedProtocols: ['h2']. http://dartbug.com/37950
-      socket = await SecureSocket.secure(socket,
-          // This is not really the host, but the authority to verify the TLC
-          // connection against.
-          //
-          // We don't use `this.authority` here, as that includes the port.
-          host: options.credentials.authority ?? host,
-          context: securityContext,
-          onBadCertificate: _validateBadCertificate);
+    try {
+      final securityContext = credentials.securityContext;
+      Socket socket = await Socket.connect(host, port);
+      // Don't wait for io buffers to fill up before sending requests.
+      socket.setOption(SocketOption.tcpNoDelay, true);
+      if (securityContext != null) {
+        // Todo(sigurdm): We want to pass supportedProtocols: ['h2']. http://dartbug.com/37950
+        socket = await SecureSocket.secure(socket,
+            // This is not really the host, but the authority to verify the TLC
+            // connection against.
+            //
+            // We don't use `this.authority` here, as that includes the port.
+            host: options.credentials.authority ?? host,
+            context: securityContext,
+            onBadCertificate: _validateBadCertificate);
+      }
+
+      final connection = ClientTransportConnection.viaSocket(socket);
+      socket.done.then((_) => _abandonConnection());
+
+      // Give the settings settings-frame a bit of time to arrive.
+      // TODO(sigurdm): This is a hack. The http2 package should expose a way of
+      // waiting for the settings frame to arrive.
+      await new Future.delayed(_estimatedRoundTripTime);
+
+      if (_state == ConnectionState.shutdown) {
+        socket.destroy();
+        throw _ShutdownException();
+      }
+      return connection;
+    } catch(e) {
+      return Future.error(e);
     }
-
-    final connection = ClientTransportConnection.viaSocket(socket);
-    socket.done.then((_) => _abandonConnection());
-
-    // Give the settings settings-frame a bit of time to arrive.
-    // TODO(sigurdm): This is a hack. The http2 package should expose a way of
-    // waiting for the settings frame to arrive.
-    await new Future.delayed(_estimatedRoundTripTime);
-
-    if (_state == ConnectionState.shutdown) {
-      socket.destroy();
-      throw _ShutdownException();
-    }
-    return connection;
   }
 
   void _connect() {
